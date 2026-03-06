@@ -27,29 +27,30 @@ final class Request
         $request->query = $_GET ?? [];
 
         $request->headers = self::collectHeaders();
-        $request->contentType = strtolower($request->headers['content-type'] ?? '');
+        $request->contentType = (string)($request->headers['content-type'] ?? '');
+        $normalizedContentType = strtolower($request->contentType);
 
         $request->rawBody = file_get_contents('php://input') ?: '';
 
         if ($request->method === 'POST') {
-            if (str_contains($request->contentType, 'application/json')) {
+            if (str_contains($normalizedContentType, 'application/json')) {
                 $request->body = self::decodeJson($request->rawBody);
-            } elseif (str_contains($request->contentType, 'multipart/form-data')) {
+            } elseif (str_contains($normalizedContentType, 'multipart/form-data')) {
                 $request->body = $_POST ?? [];
                 $request->files = $_FILES ?? [];
-            } elseif (str_contains($request->contentType, 'application/x-www-form-urlencoded')) {
+            } elseif (str_contains($normalizedContentType, 'application/x-www-form-urlencoded')) {
                 $request->body = $_POST ?? [];
             }
         }
 
         if (in_array($request->method, ['PUT', 'PATCH'], true)) {
-            if (str_contains($request->contentType, 'application/json')) {
+            if (str_contains($normalizedContentType, 'application/json')) {
                 $request->body = self::decodeJson($request->rawBody);
-            } elseif (str_contains($request->contentType, 'multipart/form-data')) {
+            } elseif (str_contains($normalizedContentType, 'multipart/form-data')) {
                 [$fields, $files] = self::parseMultipartBody($request->rawBody, $request->contentType);
                 $request->body = $fields;
                 $request->files = $files;
-            } elseif (str_contains($request->contentType, 'application/x-www-form-urlencoded')) {
+            } elseif (str_contains($normalizedContentType, 'application/x-www-form-urlencoded')) {
                 $fields = [];
                 parse_str($request->rawBody, $fields);
                 $request->body = $fields;
@@ -92,7 +93,7 @@ final class Request
 
     public function isMultipart(): bool
     {
-        return str_contains($this->contentType, 'multipart/form-data');
+        return str_contains(strtolower($this->contentType), 'multipart/form-data');
     }
 
     public function json(): array
@@ -133,23 +134,47 @@ final class Request
             return [$fields, $files];
         }
 
-        $boundary = trim($matches[1], '"');
-        $delimiter = '--' . $boundary;
-        $parts = explode($delimiter, $rawBody);
+        $boundary = trim($matches[1], "\"' ");
+        if ($boundary === '') {
+            return [$fields, $files];
+        }
+
+        $parts = explode('--' . $boundary, $rawBody);
+        if (count($parts) <= 1) {
+            // Some clients include leading dashes in boundary header value.
+            $parts = explode($boundary, $rawBody);
+        }
+        if (count($parts) <= 1) {
+            return [$fields, $files];
+        }
 
         foreach ($parts as $part) {
             $part = ltrim($part, "\r\n");
             $part = rtrim($part, "\r\n");
+            if (str_ends_with($part, '--')) {
+                $part = substr($part, 0, -2);
+                $part = rtrim($part, "\r\n");
+            }
 
             if ($part === '' || $part === '--') {
                 continue;
             }
 
-            [$rawHeaders, $content] = array_pad(explode("\r\n\r\n", $part, 2), 2, '');
-            $content = rtrim($content, "\r\n");
+            $sections = preg_split("/\r\n\r\n|\n\n/", $part, 2);
+            if (!is_array($sections) || count($sections) < 2) {
+                continue;
+            }
+            $rawHeaders = (string)$sections[0];
+            $content = (string)$sections[1];
+            if (str_ends_with($content, "\r\n")) {
+                $content = substr($content, 0, -2);
+            } elseif (str_ends_with($content, "\n")) {
+                $content = substr($content, 0, -1);
+            }
 
             $headers = [];
-            foreach (explode("\r\n", $rawHeaders) as $headerLine) {
+            $normalizedHeaders = str_replace("\r\n", "\n", $rawHeaders);
+            foreach (explode("\n", $normalizedHeaders) as $headerLine) {
                 if (strpos($headerLine, ':') === false) {
                     continue;
                 }
