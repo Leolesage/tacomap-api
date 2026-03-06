@@ -86,6 +86,7 @@ final class TacosPlaceController
 
         $item = TacosPlace::create($clean);
         $this->sendCreationEmail($item);
+        $this->sendAdminNotificationEmail($item, 'created');
 
         Response::json($this->mapTacosPlace($item), 201);
     }
@@ -134,6 +135,7 @@ final class TacosPlaceController
         if ($item === null) {
             Response::json(['error' => 'not_found'], 404);
         }
+        $this->sendAdminNotificationEmail($item, 'updated');
         Response::json($this->mapTacosPlace($item), 200);
     }
 
@@ -275,6 +277,41 @@ final class TacosPlaceController
 
         $mailer = new Mailer($this->config['smtp']);
         $mailer->send((string)$mapped['contact_email'], 'TacoMap France - TacosPlace Created', implode("\n", $lines));
+    }
+
+    private function sendAdminNotificationEmail(array $item, string $action): void
+    {
+        $to = trim((string)($this->config['app']['admin_notify_email'] ?? ''));
+        if ($to === '' || filter_var($to, FILTER_VALIDATE_EMAIL) === false) {
+            return;
+        }
+
+        $mapped = $this->mapTacosPlace($item);
+        $detailLink = $this->detailLink((int)$mapped['id']);
+        $actionLabel = $action === 'updated' ? 'updated' : 'created';
+
+        $lines = [
+            'A TacosPlace has been ' . $actionLabel . ' on TacoMap France.',
+            '',
+            'ID: ' . $mapped['id'],
+            'Name: ' . $mapped['name'],
+            'Description: ' . $mapped['description'],
+            'Date: ' . $mapped['date'],
+            'Price: ' . $mapped['price'],
+            'Latitude: ' . $mapped['latitude'],
+            'Longitude: ' . $mapped['longitude'],
+            'Contact Name: ' . $mapped['contact_name'],
+            'Contact Email: ' . $mapped['contact_email'],
+            'Photo URL: ' . $mapped['photo_url'],
+            'Created At: ' . $mapped['created_at'],
+            'Updated At: ' . $mapped['updated_at'],
+            '',
+            'Detail link: ' . $detailLink,
+        ];
+
+        $subjectAction = $actionLabel === 'updated' ? 'Updated' : 'Created';
+        $mailer = new Mailer($this->config['smtp']);
+        $mailer->send($to, 'TacoMap France - TacosPlace ' . $subjectAction, implode("\n", $lines));
     }
 
     private function detailLink(int $id): string
