@@ -12,6 +12,7 @@ return [
     'app' => [
         'url' => Env::get('APP_URL', 'http://localhost:8001'),
         'admin_detail_base_url' => Env::get('ADMIN_DETAIL_BASE_URL', ''),
+        'admin_notify_email' => Env::get('ADMIN_NOTIFY_EMAIL', ''),
     ],
     'db' => [
         'dsn' => Env::get('DB_DSN', ''),
